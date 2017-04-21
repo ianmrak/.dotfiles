@@ -6,3 +6,8 @@ alias cdpm="cd ~/Documents/Projects/MKS-projects"
 alias dr="cd ~/Documents/Projects/drivus"
 alias bp="vim ~/.bash_profile"
 alias vp="vim ~/.vimrc"
+alias lsa="ls -a"
+
+export CLICOLOR=1
+export LSCOLORS=GxFxCxDxBxegedabagaced
+
