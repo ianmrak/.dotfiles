@@ -1,0 +1,251 @@
+# vim: ft=zsh
+# Do these before the prompt is shown
+if [ -n "$ZSH_VERSION" ]; then
+    __symbol='%%'
+    __red='%F{red}'
+    __green='%F{green}'
+    __black='%F{black}'
+    __blue='%F{blue}'
+    __magenta='%F{magenta}'
+    __yellow='%F{yellow}'
+    __bold='%B'
+    __unbold='%b'
+    __reset='%f'
+
+    export ZLE_RPROMPT_INDENT=0
+    setopt PROMPT_SUBST
+
+    PS1='`__zsh_ps1` '
+    RPS1='%(?..%B%F{black}%?%f%b)'
+    precmd_functions=($precmd_functions __title __which_repo)
+else
+    __symbol='$'
+    __black="\001\033[0;30m\002"
+    __red="\001\033[0;31m\002"
+    __green="\001\033[0;32m\002"
+    __yellow="\001\033[0;33m\002"
+    __blue="\001\033[0;34m\002"
+    __magenta="\001\033[0;35m\002"
+    __bold="\001\033[1m\002"
+    __unbold="\001\033[0m\002"
+    __reset="\001\033[0m\002"
+
+    PROMPT_COMMAND='__title; __which_repo; __bash_ps1'
+fi
+PS2='`__prompt_symbol` '
+
+# Branch and worktree state
+__hg_state() {
+    local modified="±"
+    local added="+"
+    local removed="\x2D" # minus sign
+    local missing="!"
+    local untracked="?"
+
+    # use sed for ± since tr doesn't respect unicode
+    printf '%s%s %s%s%s%s' \
+           "$__magenta" \
+           "$(hg branch 2>/dev/null)" \
+           "$__black" \
+           "$__bold" \
+           "$(hg status 2>/dev/null | cut -c 1 \
+                                    | sort -u \
+                                    | sed "s/M/$modified/g" \
+                                    | tr 'A' $added \
+                                    | tr 'D' $removed \
+                                    | tr '!' $missing \
+                                    | tr '?' $untracked)" \
+           "$__unbold"
+}
+
+# Revision and worktree state
+__svn_state() {
+    local modified="±"
+    local added="+"
+    local removed="\x2D" # minus sign
+    local missing="!"
+    local untracked="?"
+
+    # use sed for ± since tr doesn't respect unicode
+    printf '%s%s %s%s%s%s' \
+           "$__blue" \
+           "$(svn info 2>/dev/null | awk '$1 == "Revision:" { print $2 }')" \
+           "$__black" \
+           "$__bold" \
+           "$(svn status 2>/dev/null | cut -c 1 \
+                                     | sort -u \
+                                     | sed "s/M/$modified/g" \
+                                     | tr 'A' $added \
+                                     | tr 'D' $removed \
+                                     | tr '!' $missing \
+                                     | tr '?' $untracked)" \
+           "$__unbold"
+}
+
+# Characters describing the working tree changes
+__git_state() {
+    local untracked
+    local modified
+    local deleted
+    local staged
+    local unmerged
+
+    OLDIFS=$IFS
+    while IFS=$'\n' read -r l; do
+        IFS=$OLDIFS
+        case "$(echo "$l" | cut -c-2)" in
+            '##')
+                printf %s "$__yellow"
+                if expr "$l" : '^## HEAD' >/dev/null 2>&1; then
+                    printf ∅
+                else
+                    printf "$(echo "$l" | cut -d ' ' -f2 | cut -d . -f1)"
+                    case "$l" in
+                        '* [ahead *]') printf ' ⇡' ;;
+                        '* [behind *]') printf ' ⇣' ;;
+                    esac
+                fi
+                ;;
+            '??') untracked="?" ;;
+            '!!') ;;
+            'DD|AU|UD|UA|DU|AA|UU') unmerged="!" ;;
+            ' M') modified="±" ;;
+            '*M') modified="±"; staged="⌅" ;;
+            ' D') deleted="\x2D" ;;
+            '*D') deleted="\x2D"; staged="⌅" ;;
+            '*') staged="⌅" ;;
+        esac
+    done < <(git -C "${__git_dir:-.}" status --porcelain -b 2> /dev/null | uniq )
+    IFS=$OLDIFS
+
+    printf %s "$__black$__bold "
+    for icon in $modified $deleted $untracked $staged $unmerged; do
+        printf $icon
+    done
+    printf %s "$__unbold"
+}
+
+# Prompt symbols specifically for git rebasing/merging states
+__git_prompt() {
+    [ -z "$__git_dir" ] && return
+    local git_symbol="∓"
+    local merging="☍"
+    local rebasing="⤣"
+    local bisecting="⧷"
+    local cherry="❦"
+    local g="$__git_dir"
+
+    local r=$git_symbol
+    if [ -f "$g/rebase-merge/interactive" ]; then
+        r=$rebasing">"
+    elif [ -d "$g/rebase-merge" ]; then
+        r=$rebasing$merging
+    else
+        if [ -d "$g/rebase-apply" ]; then
+            if [ -f "$g/rebase-apply/rebasing" ]; then
+                r=$rebasing
+            elif [ -f "$g/rebase-apply/applying" ]; then
+                r="AM"
+            else
+                r="AM/REBASE"
+            fi
+        elif [ -f "$g/MERGE_HEAD" ]; then
+            r=$merging
+        elif [ -f "$g/MERGE_MSG" ]; then
+            r=$merging
+        elif [ -f "$g/CHERRY_PICK_HEAD" ]; then
+            r=$cherry
+        elif [ -f "$g/BISECT_LOG" ]; then
+            r=$bisecting
+        fi
+    fi
+    printf %s "$r"
+}
+
+# Which version control, if any, controls this directory?
+__which_repo(){
+    # So that we don't have carry-over from previous prompts
+    unset __git_dir __svn_dir __hg_dir
+
+    local folder='.'
+    for i in $(seq 0 $(pwd|tr -cd '/'|wc -c)); do
+        [ -d $folder/.git ] && export __git_dir=$folder
+        [ -d $folder/.svn ] && export __svn_dir=$folder
+        [ -d $folder/.hg ] && export __hg_dir=$folder
+        folder="../$folder"
+    done
+}
+
+# Bell characters tell the WM that we're "urgent"
+__urgent() {
+    printf \\a
+}
+
+# set the terminal title
+__title() {
+    case "$TERM" in
+        xterm*|*rxvt*)
+            local TTY="$(tty | perl -pe 's|/dev/||')"
+            local DIR="$(echo $PWD | perl -pe "s|^$HOME|~|")"
+            printf '\033]0;%s %s\007' "$TTY" "$DIR"
+            ;;
+        *)
+            ;;
+    esac
+}
+
+# Symbol before the cursor
+__prompt_symbol() {
+    local hg_symbol="☿"
+    local svn_symbol="⚡"
+    local symbol="$__green$__symbol"
+    if [ $EUID = 0 ]; then symbol=$__red#; fi
+
+    # Per-repository symbols
+    if [ -n "${__svn_dir}" ]; then
+        symbol="$__blue$svn_symbol"
+    elif [ -n "${__git_dir}" ]; then
+        symbol="$__yellow$(__git_prompt)"
+    elif [ -n "${__hg_dir}" ]; then
+        symbol="$__magenta$hg_symbol"
+    fi
+
+   # Repeat symbol for each subshell.
+   for level in $(seq 1 $SHLVL); do
+       echo -en "$symbol$__reset"
+   done
+}
+
+# print branch/revision + worktree state
+__repo_info() {
+    if [ -n "${__svn_dir+x}" ]; then
+        printf ' '; __svn_state
+    elif [ -n "${__git_dir+x}" ]; then
+        printf ' '; __git_state
+    elif [ -n "${__hg_dir+x}" ]; then
+        printf ' '; __hg_state
+    fi
+}
+
+__zsh_ps1() {
+    echo -n '%(!~%F{red}~%F{blue})%n '
+    echo -n "%F{green}%$(($COLUMNS-${#USER}-1))<..<%~"
+    __repo_info
+    echo "%<<"
+    __prompt_symbol
+}
+
+__bash_ps1(){
+    if [ $EUID = 0 ]; then
+        PS1="$__red"
+    else
+        PS1="$__blue"
+    fi
+    PS1="${PS1}\u $__green\w"
+    PS1="${PS1}""$(__repo_info)\n"
+    for i in $(seq 1 $SHLVL); do
+        PS1="${PS1} "
+    done
+    PS1="$PS1\[\033[\${SHLVL}D\]""$(__prompt_symbol) "
+}
+

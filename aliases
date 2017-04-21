@@ -1,0 +1,8 @@
+alias ls="ls -G"
+alias g="git"
+alias co="checkout"
+alias cdp="cd ~/Documents/Projects"
+alias cdpm="cd ~/Documents/Projects/MKS-projects"
+alias dr="cd ~/Documents/Projects/drivus"
+alias bp="vim ~/.bash_profile"
+alias vp="vim ~/.vimrc"
